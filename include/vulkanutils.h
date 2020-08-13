@@ -305,4 +305,15 @@ getPhysicalDeviceQueueFamilyProperties(const VkPhysicalDevice physicalDevice) {
   return std::move(queueFamilies);
 }
 
+/// Checks if a physical device & queue supports presenting images to a surface
+VkBool32 hasSurfaceSupport(const VkPhysicalDevice physicalDevice,
+                           uint32_t queueFamilyIndex, VkSurfaceKHR surface) {
+
+  VkBool32 surfaceSupport;
+  vkGetPhysicalDeviceSurfaceSupportKHR(physicalDevice, queueFamilyIndex,
+                                       surface, &surfaceSupport);
+
+  return surfaceSupport;
+}
+
 #endif // VULKAN_UTILS_H
