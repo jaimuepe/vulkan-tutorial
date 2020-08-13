@@ -47,7 +47,8 @@ private:
   /// Create a vkInstance to interact with the vulkan driver
   void createInstance() {
 
-    checkValidationLayerSupport();
+    checkLayerSupport();
+    checkExtensionSupport();
 
     VkApplicationInfo appInfo{};
     appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
@@ -77,33 +78,14 @@ private:
     VkDebugUtilsMessengerCreateInfoEXT debugCreateInfo;
     if (enableValidationLayers) {
       populateDebugMessengerCreateInfo(debugCreateInfo);
+
+      // to create a special debugMessenger used only
+      // during instance creation
       createInfo.pNext = &debugCreateInfo;
     }
 
     if (vkCreateInstance(&createInfo, nullptr, &m_instance) != VK_SUCCESS) {
       throw std::runtime_error{"failed to create vk_instance!"};
-    }
-
-    // list available extensions
-    std::vector<VkExtensionProperties> extensions = getInstanceExtensions();
-
-    /*
-      std::cout << "Available extensions:" << std::endl;
-      for (const VkExtensionProperties &extension : extensions) {
-        std::cout << '\t' << extension.extensionName << std::endl;
-      }
-    */
-
-    // check for unsupported extensions
-
-    std::vector<std::string> unsupportedExtensions =
-        getUnsupportedExtensions(extensions, requiredExtensions);
-
-    if (unsupportedExtensions.size() > 0) {
-      std::cout << "Unsupported extensions:" << std::endl;
-      for (const std::string &extension : unsupportedExtensions) {
-        std::cout << '\t' << extension << std::endl;
-      }
     }
   }
 

@@ -85,6 +85,7 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
   return VK_FALSE;
 }
 
+/// creates and fills the fileds of the debugMessengerCreateInfo.
 void populateDebugMessengerCreateInfo(
     VkDebugUtilsMessengerCreateInfoEXT &createInfo) {
 
@@ -145,6 +146,7 @@ std::vector<const char *> getRequiredExtensions() {
   return std::move(extensions);
 }
 
+/// Returns the layers required by the vkInstance.
 std::vector<const char *> getRequiredLayers() {
   if (enableValidationLayers) {
     return {"VK_LAYER_KHRONOS_validation"};
@@ -215,8 +217,30 @@ getUnsupportedLayers(const std::vector<VkLayerProperties> &availableLayers,
   return std::move(unsupportedLayers);
 }
 
-/// Check if all the validation layers required are available.
-void checkValidationLayerSupport() {
+/// Check if all the required extensions are available.
+void checkExtensionSupport() {
+
+  std::vector<std::string> unsupportedExtensions = getUnsupportedExtensions(
+      getInstanceExtensions(), getRequiredExtensions());
+
+  if (unsupportedExtensions.size() > 0) {
+
+    std::stringstream errorMsg;
+    errorMsg << "Extensions requested but are not available: ";
+
+    for (size_t i = 0; i < unsupportedExtensions.size(); ++i) {
+      errorMsg << unsupportedExtensions[i];
+      if (i < unsupportedExtensions.size() - 1) {
+        errorMsg << ", ";
+      }
+    }
+
+    throw std::runtime_error{errorMsg.str()};
+  }
+}
+
+/// Check if all the layers required are available.
+void checkLayerSupport() {
 
   std::vector<std::string> unsupportedLayers =
       getUnsupportedLayers(getInstanceLayers(), getRequiredLayers());
