@@ -26,6 +26,7 @@ set(
     MY_HEADERS
     "include/vulkanutils.h"
     "include/queuefamilyindices.h"
+    "include/swapchainsupportdetails.h"
 )
 
 foreach(APP ${APPS})
@@ -42,7 +43,8 @@ foreach(APP ${APPS})
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/bin/${APP}")
 
     if (MSVC)
-        target_compile_options(${APP} PRIVATE /W4 /WX)
+        # target_compile_options(${APP} PRIVATE /W4 /WX)
+        target_compile_options(${APP} PRIVATE /W4)
     endif(MSVC)
 
     target_compile_definitions(

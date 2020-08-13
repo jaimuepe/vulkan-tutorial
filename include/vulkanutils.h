@@ -2,6 +2,8 @@
 #ifndef VULKAN_UTILS_H
 #define VULKAN_UTILS_H
 
+#include "swapchainsupportdetails.h"
+
 #include <glfw/glfw3.h>
 
 #include <iostream>
@@ -273,6 +275,22 @@ std::vector<VkPhysicalDevice> getPhysicalDevices(const VkInstance instance) {
   return std::move(physicalDevices);
 }
 
+/// Returns the extensions available for a physical device.
+std::vector<VkExtensionProperties>
+getPhysicalDeviceExtensions(const VkPhysicalDevice physicalDevice) {
+  uint32_t extensionsCount;
+  vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr,
+                                       &extensionsCount, nullptr);
+
+  std::vector<VkExtensionProperties> extensions{extensionsCount};
+
+  vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr,
+                                       &extensionsCount, extensions.data());
+
+  return std::move(extensions);
+}
+
+/// Returns the properties of a physical device.
 VkPhysicalDeviceProperties
 getPhysicalDeviceProperties(const VkPhysicalDevice physicalDevice) {
 
@@ -282,6 +300,7 @@ getPhysicalDeviceProperties(const VkPhysicalDevice physicalDevice) {
   return properties;
 }
 
+/// Returns the features of a physical device.
 VkPhysicalDeviceFeatures
 getPhysicalDeviceFeatures(const VkPhysicalDevice physicalDevice) {
 
@@ -291,6 +310,7 @@ getPhysicalDeviceFeatures(const VkPhysicalDevice physicalDevice) {
   return features;
 }
 
+// Returns the queueFamilies of a physical device.
 std::vector<VkQueueFamilyProperties>
 getPhysicalDeviceQueueFamilyProperties(const VkPhysicalDevice physicalDevice) {
 
@@ -307,13 +327,77 @@ getPhysicalDeviceQueueFamilyProperties(const VkPhysicalDevice physicalDevice) {
 
 /// Checks if a physical device & queue supports presenting images to a surface
 VkBool32 hasSurfaceSupport(const VkPhysicalDevice physicalDevice,
-                           uint32_t queueFamilyIndex, VkSurfaceKHR surface) {
+                           const uint32_t queueFamilyIndex,
+                           const VkSurfaceKHR surface) {
 
   VkBool32 surfaceSupport;
   vkGetPhysicalDeviceSurfaceSupportKHR(physicalDevice, queueFamilyIndex,
                                        surface, &surfaceSupport);
 
   return surfaceSupport;
+}
+
+/// Returns the extensions required for a physical device (swapchain support).
+std::vector<const char *> getRequiredPhysicalDeviceExtensions() {
+  return {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
+}
+
+/// Check if all the required extensions are available for a physical device.
+bool checkPhysicalDeviceExtensionSupport(
+    const VkPhysicalDevice physicalDevice) {
+
+  std::vector<std::string> unsupportedExtensions =
+      getUnsupportedExtensions(getPhysicalDeviceExtensions(physicalDevice),
+                               getRequiredPhysicalDeviceExtensions());
+
+  return unsupportedExtensions.size() == 0;
+}
+
+/// Returns swapchain support info for a physical device & a surface.
+SwapchainSupportDetails
+querySwapChainSupport(const VkPhysicalDevice physicalDevice,
+                      const VkSurfaceKHR surface) {
+
+  SwapchainSupportDetails details;
+  vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice, surface,
+                                            &details.capabilities);
+
+  uint32_t formatCount;
+  vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, surface, &formatCount,
+                                       nullptr);
+  if (formatCount > 0) {
+    details.formats.resize(formatCount);
+    vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, surface, &formatCount,
+                                         details.formats.data());
+  }
+
+  uint32_t presentModeCount;
+  vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice, surface,
+                                            &presentModeCount, nullptr);
+  if (presentModeCount > 0) {
+    details.presentModes.resize(presentModeCount);
+    vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice, surface,
+                                              &presentModeCount,
+                                              details.presentModes.data());
+  }
+
+  return details;
+}
+
+/// Returns the images that belong to a specific device & swapchain.
+std::vector<VkImage> getSwapchainImages(VkDevice device,
+                                        VkSwapchainKHR swapchain) {
+
+  uint32_t swapchainImageCount;
+  vkGetSwapchainImagesKHR(device, swapchain, &swapchainImageCount, nullptr);
+
+  // When doing uniform initialization, initializer_list constructor takes
+  // precedence over other constructors
+  std::vector<VkImage> swapchainImages(swapchainImageCount);
+  vkGetSwapchainImagesKHR(device, swapchain, &swapchainImageCount,
+                          swapchainImages.data());
+
+  return std::move(swapchainImages);
 }
 
 #endif // VULKAN_UTILS_H
