@@ -261,4 +261,48 @@ void checkLayerSupport() {
   }
 }
 
+std::vector<VkPhysicalDevice> getPhysicalDevices(VkInstance instance) {
+
+  uint32_t physicalDeviceCount;
+  vkEnumeratePhysicalDevices(instance, &physicalDeviceCount, nullptr);
+
+  std::vector<VkPhysicalDevice> physicalDevices{physicalDeviceCount};
+  vkEnumeratePhysicalDevices(instance, &physicalDeviceCount,
+                             physicalDevices.data());
+
+  return std::move(physicalDevices);
+}
+
+VkPhysicalDeviceProperties
+getPhysicalDeviceProperties(VkPhysicalDevice physicalDevice) {
+
+  VkPhysicalDeviceProperties properties;
+  vkGetPhysicalDeviceProperties(physicalDevice, &properties);
+
+  return properties;
+}
+
+VkPhysicalDeviceFeatures
+getPhysicalDeviceFeatures(VkPhysicalDevice physicalDevice) {
+
+  VkPhysicalDeviceFeatures features;
+  vkGetPhysicalDeviceFeatures(physicalDevice, &features);
+
+  return features;
+}
+
+std::vector<VkQueueFamilyProperties>
+getPhysicalDeviceQueueFamilyProperties(VkPhysicalDevice physicalDevice) {
+
+  uint32_t queueFamilyCount;
+  vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueFamilyCount,
+                                           nullptr);
+
+  std::vector<VkQueueFamilyProperties> queueFamilies{queueFamilyCount};
+  vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueFamilyCount,
+                                           queueFamilies.data());
+
+  return std::move(queueFamilies);
+}
+
 #endif // VULKAN_UTILS_H

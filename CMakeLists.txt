@@ -22,12 +22,18 @@ set (
     "1.hello-triangle"
 )
 
+set(
+    MY_HEADERS
+    "include/vulkanutils.h"
+    "include/queuefamilyindices.h"
+)
+
 foreach(APP ${APPS})
 
     add_executable(
         ${APP} 
         "src/${APP}/${APP}.cpp"
-        "include/vulkanutils.h"
+        ${MY_HEADERS}
     )
 
     set_target_properties(

@@ -1,3 +1,4 @@
+#include "queuefamilyindices.h"
 #include "vulkanutils.h"
 
 #include <GLFW/glfw3.h>
@@ -28,6 +29,8 @@ private:
   VkInstance m_instance;
   VkDebugUtilsMessengerEXT m_debugMessenger;
 
+  VkPhysicalDevice m_physicalDevice;
+
   void initWindow() {
 
     glfwInit();
@@ -42,6 +45,7 @@ private:
   void initVulkan() {
     createInstance();
     setupDebugMessenger();
+    pickPhysicalDevice();
   }
 
   /// Create a vkInstance to interact with the vulkan driver
@@ -102,6 +106,65 @@ private:
                                      &m_debugMessenger) != VK_SUCCESS) {
       throw std::runtime_error("Failed to set up debug messenger!");
     }
+  }
+
+  /// Checks if a physical devices matches the application requirements
+  bool isPhysicalDeviceSuitable(VkPhysicalDevice physicalDevice) {
+
+    // any GPU supports graphics queue
+    QueueFamilyIndices queueFamilyIndices = findQueueFamilies(physicalDevice);
+
+    return queueFamilyIndices.isComplete();
+  }
+
+  /// Picks an appropiate physicalDevice (graphics card)
+  void pickPhysicalDevice() {
+
+    std::vector<VkPhysicalDevice> physicalDevices =
+        getPhysicalDevices(m_instance);
+
+    if (physicalDevices.size() == 0) {
+      throw std::runtime_error("Failed to find GPUs with vulkan support!");
+    }
+
+    for (const VkPhysicalDevice &device : physicalDevices) {
+      if (isPhysicalDeviceSuitable(device)) {
+        m_physicalDevice = device;
+        break;
+      }
+    }
+
+    if (!m_physicalDevice) {
+      throw std::runtime_error("Failed to find a suitable GPU!");
+    }
+
+    VkPhysicalDeviceProperties properties =
+        getPhysicalDeviceProperties(m_physicalDevice);
+
+    std::cout << "Physical device: " << properties.deviceName << std::endl;
+  }
+
+  /// Returns the neccesary query indices for a physical device.
+  QueueFamilyIndices findQueueFamilies(VkPhysicalDevice physicalDevice) {
+
+    QueueFamilyIndices indices;
+
+    std::vector<VkQueueFamilyProperties> queueFamilyProperties =
+        getPhysicalDeviceQueueFamilyProperties(physicalDevice);
+
+    for (size_t i = 0; i < queueFamilyProperties.size(); ++i) {
+
+      // supports graphics queue?
+      if (queueFamilyProperties[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
+        indices.graphicsFamily = i;
+      }
+
+      if (indices.isComplete()) {
+        break;
+      }
+    }
+
+    return indices;
   }
 
   void mainLoop() {
