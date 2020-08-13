@@ -30,6 +30,8 @@ private:
   VkDebugUtilsMessengerEXT m_debugMessenger;
 
   VkPhysicalDevice m_physicalDevice;
+  VkDevice m_device;
+  VkQueue m_graphicsQueue;
 
   void initWindow() {
 
@@ -46,6 +48,7 @@ private:
     createInstance();
     setupDebugMessenger();
     pickPhysicalDevice();
+    createLogicalDevice();
   }
 
   /// Create a vkInstance to interact with the vulkan driver
@@ -89,7 +92,7 @@ private:
     }
 
     if (vkCreateInstance(&createInfo, nullptr, &m_instance) != VK_SUCCESS) {
-      throw std::runtime_error{"failed to create vk_instance!"};
+      throw std::runtime_error{"Failed to create vk_instance!"};
     }
   }
 
@@ -104,14 +107,14 @@ private:
 
     if (CreateDebugUtilsMessengerEXT(m_instance, &createInfo, nullptr,
                                      &m_debugMessenger) != VK_SUCCESS) {
-      throw std::runtime_error("Failed to set up debug messenger!");
+      throw std::runtime_error{"Failed to set up debug messenger!"};
     }
   }
 
   /// Checks if a physical devices matches the application requirements
   bool isPhysicalDeviceSuitable(VkPhysicalDevice physicalDevice) {
 
-    // any GPU supports graphics queue
+    // any GPU that supports graphics queue
     QueueFamilyIndices queueFamilyIndices = findQueueFamilies(physicalDevice);
 
     return queueFamilyIndices.isComplete();
@@ -124,7 +127,7 @@ private:
         getPhysicalDevices(m_instance);
 
     if (physicalDevices.size() == 0) {
-      throw std::runtime_error("Failed to find GPUs with vulkan support!");
+      throw std::runtime_error{"Failed to find GPUs with vulkan support!"};
     }
 
     for (const VkPhysicalDevice &device : physicalDevices) {
@@ -135,7 +138,7 @@ private:
     }
 
     if (!m_physicalDevice) {
-      throw std::runtime_error("Failed to find a suitable GPU!");
+      throw std::runtime_error{"Failed to find a suitable GPU!"};
     }
 
     VkPhysicalDeviceProperties properties =
@@ -144,8 +147,51 @@ private:
     std::cout << "Physical device: " << properties.deviceName << std::endl;
   }
 
+  /// creates a logical device to interface with the selected physical device.
+  void createLogicalDevice() {
+
+    QueueFamilyIndices queueIndices = findQueueFamilies(m_physicalDevice);
+
+    VkDeviceQueueCreateInfo queueCreateInfo{};
+    queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+    queueCreateInfo.queueCount = 1;
+    queueCreateInfo.queueFamilyIndex = queueIndices.graphicsFamily.value();
+
+    // queue priority in the command buffer scheduling
+    float queuePriority = 1.0f;
+    queueCreateInfo.pQueuePriorities = &queuePriority;
+
+    // we dont need any special feature right now - everything defaults to FALSE
+    VkPhysicalDeviceFeatures deviceFeatures{};
+
+    VkDeviceCreateInfo createInfo{};
+    createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+
+    createInfo.queueCreateInfoCount = 1;
+    createInfo.pQueueCreateInfos = &queueCreateInfo;
+
+    createInfo.pEnabledFeatures = &deviceFeatures;
+
+    // device extensions are deprecated
+    createInfo.enabledExtensionCount = 0;
+
+    std::vector<const char *> layers = getRequiredLayers();
+
+    createInfo.enabledLayerCount = layers.size();
+    createInfo.ppEnabledLayerNames = layers.data();
+
+    if (vkCreateDevice(m_physicalDevice, &createInfo, nullptr, &m_device) !=
+        VK_SUCCESS) {
+      throw std::runtime_error{"Failed to create logical device!"};
+    }
+
+    // retrieve the first queue of the graphics family
+    vkGetDeviceQueue(m_device, queueIndices.graphicsFamily.value(), 0,
+                     &m_graphicsQueue);
+  }
+
   /// Returns the neccesary query indices for a physical device.
-  QueueFamilyIndices findQueueFamilies(VkPhysicalDevice physicalDevice) {
+  QueueFamilyIndices findQueueFamilies(VkPhysicalDevice physicalDevice) const {
 
     QueueFamilyIndices indices;
 
@@ -174,6 +220,8 @@ private:
   }
 
   void cleanup() {
+
+    vkDestroyDevice(m_device, nullptr);
 
     if (enableValidationLayers) {
       DestroyDebugUtilsMessengerEXT(m_instance, m_debugMessenger, nullptr);

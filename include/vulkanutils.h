@@ -85,7 +85,7 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
   return VK_FALSE;
 }
 
-/// creates and fills the fileds of the debugMessengerCreateInfo.
+/// creates and fills the fields of the debugMessengerCreateInfo.
 void populateDebugMessengerCreateInfo(
     VkDebugUtilsMessengerCreateInfoEXT &createInfo) {
 
@@ -261,7 +261,7 @@ void checkLayerSupport() {
   }
 }
 
-std::vector<VkPhysicalDevice> getPhysicalDevices(VkInstance instance) {
+std::vector<VkPhysicalDevice> getPhysicalDevices(const VkInstance instance) {
 
   uint32_t physicalDeviceCount;
   vkEnumeratePhysicalDevices(instance, &physicalDeviceCount, nullptr);
@@ -274,7 +274,7 @@ std::vector<VkPhysicalDevice> getPhysicalDevices(VkInstance instance) {
 }
 
 VkPhysicalDeviceProperties
-getPhysicalDeviceProperties(VkPhysicalDevice physicalDevice) {
+getPhysicalDeviceProperties(const VkPhysicalDevice physicalDevice) {
 
   VkPhysicalDeviceProperties properties;
   vkGetPhysicalDeviceProperties(physicalDevice, &properties);
@@ -283,7 +283,7 @@ getPhysicalDeviceProperties(VkPhysicalDevice physicalDevice) {
 }
 
 VkPhysicalDeviceFeatures
-getPhysicalDeviceFeatures(VkPhysicalDevice physicalDevice) {
+getPhysicalDeviceFeatures(const VkPhysicalDevice physicalDevice) {
 
   VkPhysicalDeviceFeatures features;
   vkGetPhysicalDeviceFeatures(physicalDevice, &features);
@@ -292,7 +292,7 @@ getPhysicalDeviceFeatures(VkPhysicalDevice physicalDevice) {
 }
 
 std::vector<VkQueueFamilyProperties>
-getPhysicalDeviceQueueFamilyProperties(VkPhysicalDevice physicalDevice) {
+getPhysicalDeviceQueueFamilyProperties(const VkPhysicalDevice physicalDevice) {
 
   uint32_t queueFamilyCount;
   vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueFamilyCount,
