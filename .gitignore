@@ -6,6 +6,10 @@
 *.lo
 *.o
 *.obj
+
+# Compiled shader files
+*.spv
+
 # obj models shouldnt be ignored
 !/resources/models/**
 

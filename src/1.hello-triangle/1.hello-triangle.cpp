@@ -70,6 +70,7 @@ private:
     createLogicalDevice();
     createSwapchain();
     createImageViews();
+    createRenderPass();
     createGraphicsPipeline();
   }
 
@@ -468,6 +469,8 @@ private:
       }
     }
   }
+
+  void createRenderPass() {}
 
   void createGraphicsPipeline() {
 
