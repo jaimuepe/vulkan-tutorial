@@ -11,8 +11,20 @@ set(ASSIMP_BUILD_STATIC_LIB ON CACHE BOOL "" FORCE)
 
 find_package(Vulkan REQUIRED)
 
+set (LIBS
+    glfw
+    ${Vulkan_LIBRARIES}
+)
+
 if (WIN32)
+
     set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin)
+    
+    set(LIBS
+        ${LIBS}
+        pathcch
+    )
+
 endif(WIN32)
 
 add_subdirectory(glfw)
@@ -24,9 +36,15 @@ set (
 
 set(
     MY_HEADERS
-    "include/vulkanutils.h"
+    "include/filesystemutils.h"
     "include/queuefamilyindices.h"
     "include/swapchainsupportdetails.h"
+    "include/vulkanutils.h"
+)
+
+file(
+    GLOB SHADERS
+    "shaders/*.spv"
 )
 
 foreach(APP ${APPS})
@@ -65,9 +83,16 @@ foreach(APP ${APPS})
     
     target_link_libraries(
         ${APP}
-        glfw
-        ${Vulkan_LIBRARIES}
+        ${LIBS}
     )
+
+    foreach (SHADER ${SHADERS})
+        add_custom_command(
+            TARGET ${APP} PRE_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy 
+            ${SHADER} 
+            ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/${APP})
+    endforeach(SHADER)
 
 endforeach(APP ${APPS})
     

@@ -1,3 +1,4 @@
+#include "filesystemutils.h"
 #include "queuefamilyindices.h"
 #include "swapchainsupportdetails.h"
 #include "vulkanutils.h"
@@ -48,6 +49,8 @@ private:
   std::vector<VkImage> m_swapchainImages;
   std::vector<VkImageView> m_swapchainImageViews;
 
+  VkPipelineLayout m_pipelineLayout;
+
   void initWindow() {
 
     glfwInit();
@@ -67,6 +70,7 @@ private:
     createLogicalDevice();
     createSwapchain();
     createImageViews();
+    createGraphicsPipeline();
   }
 
   /// Create a vkInstance to interact with the vulkan driver
@@ -465,6 +469,189 @@ private:
     }
   }
 
+  void createGraphicsPipeline() {
+
+    // *** shader modules ***
+    // create the shader modules of the pipeline
+
+    std::vector<char> vertShaderCode = readShaderFile("vert.spv");
+    std::vector<char> fragShaderCode = readShaderFile("frag.spv");
+
+    VkShaderModule vertShaderModule =
+        createShaderModule(m_device, vertShaderCode);
+    VkShaderModule fragShaderModule =
+        createShaderModule(m_device, fragShaderCode);
+
+    VkPipelineShaderStageCreateInfo vertShaderStageInfo{};
+    vertShaderStageInfo.sType =
+        VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    vertShaderStageInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
+    vertShaderStageInfo.module = vertShaderModule;
+    // entrypoint
+    vertShaderStageInfo.pName = "main";
+
+    // this allows us to set values for shader constants (!!)
+    // it's faster than using uniforms because the compiler can do optimizations
+    // like eliminating if statements
+    // vertShaderStageInfo.pSpecializationInfo = nullptr;
+
+    VkPipelineShaderStageCreateInfo fragShaderStageInfo{};
+    fragShaderStageInfo.sType =
+        VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    fragShaderStageInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+    fragShaderStageInfo.module = vertShaderModule;
+    fragShaderStageInfo.pName = "main";
+
+    VkPipelineShaderStageCreateInfo shaderStages[] = {vertShaderStageInfo,
+                                                      fragShaderStageInfo};
+
+    // *** vertex input ***
+    // define the vertex shader input attributes
+
+    VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
+    vertexInputInfo.sType =
+        VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+    // no bindings / attributes for now, since the data is hardcoded in the
+    // shader files
+    vertexInputInfo.vertexBindingDescriptionCount = 0;
+    vertexInputInfo.pVertexBindingDescriptions = nullptr;
+    vertexInputInfo.vertexAttributeDescriptionCount = 0;
+    vertexInputInfo.pVertexAttributeDescriptions = nullptr;
+
+    // *** input assembly ***
+    // define the type of geometry & primitive restart
+
+    VkPipelineInputAssemblyStateCreateInfo inputAssemblyInfo{};
+    inputAssemblyInfo.sType =
+        VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+    inputAssemblyInfo.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    // primitiveRestart allows to break triangles and lines when using a _STRIP
+    // topology
+    inputAssemblyInfo.primitiveRestartEnable = VK_FALSE;
+
+    // *** viewport & scissors ***
+    // viewports define transformation from image->framebuffer
+    // scissor define in which region the pixels will be stored
+
+    // viewports can scale the image but scissors can only "cut" it
+
+    VkViewport viewport;
+    viewport.x = 0.0f;
+    viewport.y = 0.0f;
+    // size of the swapchain images doesn't necessarily have to match with the
+    // window size
+    viewport.width = static_cast<float>(m_swapchainExtent.width);
+    viewport.height = static_cast<float>(m_swapchainExtent.height);
+    // depth values used for the framebuffer (usually [0.0 - 1.0])
+    viewport.minDepth = 0.0f;
+    viewport.maxDepth = 1.0f;
+
+    VkRect2D scissor;
+    scissor.offset = {0, 0};
+    scissor.extent = m_swapchainExtent;
+
+    VkPipelineViewportStateCreateInfo viewportStateInfo{};
+    viewportStateInfo.sType =
+        VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+    viewportStateInfo.viewportCount = 1;
+    viewportStateInfo.pViewports = &viewport;
+    viewportStateInfo.scissorCount = 1;
+    viewportStateInfo.pScissors = &scissor;
+
+    // *** rasterizer ***
+    // configure the rasterizing stage (generation of fragments)
+    // also depth testing, face culling, scissor test, wireframe mode
+
+    VkPipelineRasterizationStateCreateInfo rasterizerInfo{};
+    rasterizerInfo.sType =
+        VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+    // depthClamp means that fragments that are outside the nearplane-farplane
+    // region are clamped instead of discarded
+    // requires a GPU feature
+    // useful for shadow maps
+    rasterizerInfo.depthClampEnable = VK_FALSE;
+
+    // if discardEnable = true then geometry never passes the rasterizer stage,
+    // disabling any output to the framebuffer
+    rasterizerInfo.rasterizerDiscardEnable = VK_FALSE;
+
+    // determines how fragments are generated for geometry (FILL, LINE, POINT)
+    // requires a GPU feature if other than FILL
+    rasterizerInfo.polygonMode = VK_POLYGON_MODE_FILL;
+
+    // thickness of lines in terms of number of fragments
+    // requires a GPU feature if > 1.0f (wideLines)
+    rasterizerInfo.lineWidth = 1.0f;
+
+    // to cull back faces
+    rasterizerInfo.cullMode = VK_CULL_MODE_BACK_BIT;
+    // clockwise? in OpenGL is CCW
+    rasterizerInfo.frontFace = VK_FRONT_FACE_CLOCKWISE;
+
+    // the rasterizer can alter the depth values applying a constant bias or
+    // based on a fragment's slope
+    //  useful for shadow mapping
+    rasterizerInfo.depthBiasEnable = VK_FALSE;
+    rasterizerInfo.depthBiasConstantFactor = 0.0f;
+    rasterizerInfo.depthBiasClamp = 0.0f;
+    rasterizerInfo.depthBiasSlopeFactor = 0.0f;
+
+    // *** multisampling ***
+    // configure the MSAA (requires GPU feature)
+
+    // for now we are not going to use it
+    VkPipelineMultisampleStateCreateInfo multisampleInfo{};
+    multisampleInfo.sType =
+        VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+    multisampleInfo.sampleShadingEnable = VK_FALSE;
+    multisampleInfo.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+    // *** depth & stencil testing ***
+
+    // not going to use one for now
+
+    // *** color blending ***
+    // define the framebuffer blending
+
+    VkPipelineColorBlendAttachmentState colorBlendAttachment{};
+
+    // defines which channels will be present in the final color
+    colorBlendAttachment.colorWriteMask =
+        VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+        VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+
+    colorBlendAttachment.blendEnable = VK_FALSE;
+
+    VkPipelineColorBlendStateCreateInfo colorBlendInfo{};
+    colorBlendInfo.sType =
+        VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+    colorBlendInfo.logicOpEnable = GL_FALSE;
+    colorBlendInfo.attachmentCount = 1;
+    colorBlendInfo.pAttachments = &colorBlendAttachment;
+
+    // *** dynamic state ***
+    // some aspects of the pipeline can be changed dynamically without having to
+    // recreate the pipeline
+
+    // unused for now
+
+    // *** pipeline layout ***
+    // specify the uniforms passed to the shaders
+
+    VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
+    pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+
+    // for now we are not going to define any layout
+
+    if (vkCreatePipelineLayout(m_device, &pipelineLayoutInfo, nullptr,
+                               &m_pipelineLayout) != VK_SUCCESS) {
+      throw std::runtime_error("Failed to create pipeline layout!");
+    }
+
+    vkDestroyShaderModule(m_device, vertShaderModule, nullptr);
+    vkDestroyShaderModule(m_device, fragShaderModule, nullptr);
+  }
+
   void mainLoop() {
     while (!glfwWindowShouldClose(m_window)) {
       glfwPollEvents();
@@ -472,6 +659,8 @@ private:
   }
 
   void cleanup() {
+
+    vkDestroyPipelineLayout(m_device, m_pipelineLayout, nullptr);
 
     for (const VkImageView &imageView : m_swapchainImageViews) {
       vkDestroyImageView(m_device, imageView, nullptr);
