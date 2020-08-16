@@ -52,6 +52,8 @@ private:
   VkRenderPass m_renderPass;
   VkPipelineLayout m_pipelineLayout;
 
+  VkPipeline m_graphicsPipeline;
+
   void initWindow() {
 
     glfwInit();
@@ -487,14 +489,13 @@ private:
     colorAttachmentDesc.format = m_swapchainImageFormat;
     colorAttachmentDesc.samples = VK_SAMPLE_COUNT_1_BIT;
 
-    // to clear the values before
+    // to clear the values before the renderpass begins
     colorAttachmentDesc.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    // to store the content in memory so we can read them later (so we can
-    // present them)
+    // to store the content in memory so we can read them later after the
+    // renderpass ends (so we can present them)
     colorAttachmentDesc.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
 
-    // we don't care about the initial stencil values nor the final stencil
-    // values
+    // we don't care about the stencil in this example
     colorAttachmentDesc.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
     colorAttachmentDesc.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
 
@@ -527,13 +528,32 @@ private:
     // the layout we would like the attachment to have during the subpass.
     // Vulkan will transition the attachment to this layout when the subpass
     // starts.
+
+    // from the doc:
+    // VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL must only be used as a color or
+    // resolve attachment in a VkFramebuffer. This layout is valid only for
+    // image subresources of images created with the
+    // VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT usage bit enabled.
+
     colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
     VkSubpassDescription subpassDesc{};
     subpassDesc.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
 
-    // The order of these color attachments is directly referenced in the
-    // shaders: layout(location = 0) vec4 outColor;
+    // from the doc:
+    // Each element of the pInputAttachments array corresponds to an input
+    // attachment index in a fragment shader, i.e. if a shader declares an image
+    // variable decorated with a InputAttachmentIndex value of X, then it uses
+    // the attachment provided in pInputAttachments[X].
+
+    // Each element of the pColorAttachments array corresponds to an output
+    // location in the shader, i.e. if the shader declares an output variable
+    // decorated with a Location value of X, then it uses the attachment
+    // provided in pColorAttachments[X].
+
+    // in our helloTriangle example, we have in the fragment shader:
+    // layout(location = 0) out vec4 outColor;
+
     subpassDesc.colorAttachmentCount = 1;
     subpassDesc.pColorAttachments = &colorAttachmentRef;
 
@@ -592,7 +612,7 @@ private:
     fragShaderStageInfo.sType =
         VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     fragShaderStageInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-    fragShaderStageInfo.module = vertShaderModule;
+    fragShaderStageInfo.module = fragShaderModule;
     fragShaderStageInfo.pName = "main";
 
     VkPipelineShaderStageCreateInfo shaderStages[] = {vertShaderStageInfo,
@@ -741,6 +761,32 @@ private:
       throw std::runtime_error("Failed to create pipeline layout!");
     }
 
+    VkGraphicsPipelineCreateInfo pipelineInfo{};
+    pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+
+    pipelineInfo.stageCount = 2;
+    pipelineInfo.pStages = shaderStages;
+
+    pipelineInfo.pVertexInputState = &vertexInputInfo;
+    pipelineInfo.pInputAssemblyState = &inputAssemblyInfo;
+    pipelineInfo.pViewportState = &viewportStateInfo;
+    pipelineInfo.pRasterizationState = &rasterizerInfo;
+    pipelineInfo.pMultisampleState = &multisampleInfo;
+    pipelineInfo.pColorBlendState = &colorBlendInfo;
+
+    pipelineInfo.layout = m_pipelineLayout;
+
+    // we can actually use this pipeline with another renderpass, but they have
+    // to be compatible with the renderpass.
+    pipelineInfo.renderPass = m_renderPass;
+    // the subpass that will use this pipeline
+    pipelineInfo.subpass = 0;
+
+    if (vkCreateGraphicsPipelines(m_device, VK_NULL_HANDLE, 1, &pipelineInfo,
+                                  nullptr, &m_graphicsPipeline) != VK_SUCCESS) {
+      throw std::runtime_error("Failed to create graphics pipeline!");
+    }
+
     vkDestroyShaderModule(m_device, vertShaderModule, nullptr);
     vkDestroyShaderModule(m_device, fragShaderModule, nullptr);
   }
@@ -753,7 +799,9 @@ private:
 
   void cleanup() {
 
+    vkDestroyPipeline(m_device, m_graphicsPipeline, nullptr);
     vkDestroyPipelineLayout(m_device, m_pipelineLayout, nullptr);
+
     vkDestroyRenderPass(m_device, m_renderPass, nullptr);
 
     for (const VkImageView &imageView : m_swapchainImageViews) {
