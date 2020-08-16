@@ -56,6 +56,8 @@ private:
 
   VkPipeline m_graphicsPipeline;
 
+  VkCommandPool m_commandPool;
+
   void initWindow() {
 
     glfwInit();
@@ -78,6 +80,7 @@ private:
     createRenderPass();
     createGraphicsPipeline();
     createFramebuffers();
+    createCommandPool();
   }
 
   /// Create a vkInstance to interact with the vulkan driver
@@ -842,6 +845,29 @@ private:
     }
   }
 
+  /// We need a command pool from which we can create command buffers. Command
+  /// pools manage the memory of their command buffers.
+  void createCommandPool() {
+
+    QueueFamilyIndices queueFamilyIndices = findQueueFamilies(m_physicalDevice);
+
+    VkCommandPoolCreateInfo createInfo{};
+    createInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+
+    // command buffers are submitted to a device queue, so we have to specify to
+    // which queue it's going to be submitted.
+    // Each command pool can only allocate command buffers from a single queue.
+
+    // For now we are going to create a commandPool to records commands for
+    // drawing
+    createInfo.queueFamilyIndex = queueFamilyIndices.graphicsFamily.value();
+
+    if (vkCreateCommandPool(m_device, &createInfo, nullptr, &m_commandPool) !=
+        VK_SUCCESS) {
+      throw std::runtime_error("Failed to create command pool!");
+    }
+  }
+
   void mainLoop() {
     while (!glfwWindowShouldClose(m_window)) {
       glfwPollEvents();
@@ -849,6 +875,8 @@ private:
   }
 
   void cleanup() {
+
+    vkDestroyCommandPool(m_device, m_commandPool, nullptr);
 
     vkDestroyPipeline(m_device, m_graphicsPipeline, nullptr);
     vkDestroyPipelineLayout(m_device, m_pipelineLayout, nullptr);
