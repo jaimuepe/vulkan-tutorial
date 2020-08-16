@@ -49,6 +49,8 @@ private:
   std::vector<VkImage> m_swapchainImages;
   std::vector<VkImageView> m_swapchainImageViews;
 
+  std::vector<VkFramebuffer> m_swapchainFramebuffers;
+
   VkRenderPass m_renderPass;
   VkPipelineLayout m_pipelineLayout;
 
@@ -75,6 +77,7 @@ private:
     createImageViews();
     createRenderPass();
     createGraphicsPipeline();
+    createFramebuffers();
   }
 
   /// Create a vkInstance to interact with the vulkan driver
@@ -643,10 +646,12 @@ private:
     inputAssemblyInfo.primitiveRestartEnable = VK_FALSE;
 
     // *** viewport & scissors ***
-    // viewports define transformation from image->framebuffer
+    // viewports describe the region of the framebuffer that the output will be
+    // rendered to
     // scissor define in which region the pixels will be stored
 
-    // viewports can scale the image but scissors can only "cut" it
+    // viewports can scale the image but scissors can only "cut" it. Anything
+    // outside the scissor rectangle will be discarded by the rasterizer.
 
     VkViewport viewport;
     viewport.x = 0.0f;
@@ -764,6 +769,7 @@ private:
     VkGraphicsPipelineCreateInfo pipelineInfo{};
     pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
 
+    // vertex + fragment shader
     pipelineInfo.stageCount = 2;
     pipelineInfo.pStages = shaderStages;
 
@@ -791,6 +797,51 @@ private:
     vkDestroyShaderModule(m_device, fragShaderModule, nullptr);
   }
 
+  /// Create the framebuffers that will wrap the attachments used during the
+  /// render pass. A framebuffer references all of the VkImageView objects that
+  /// represent those attachments. Since we have multiple VkImageViews, we need
+  /// multiple VkFramebuffers.
+  void createFramebuffers() {
+
+    m_swapchainFramebuffers.resize(m_swapchainImageViews.size());
+
+    for (size_t i = 0; i < m_swapchainImageViews.size(); ++i) {
+
+      VkFramebufferCreateInfo createInfo{};
+      createInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+
+      // Which renderpass this framebuffer has to be COMPATIBLE with (but can be
+      // used with other compatible renderpasses).
+      createInfo.renderPass = m_renderPass;
+
+      // from the doc:
+      // pAttachments is a pointer to an array of VkImageView handles, each of
+      // which will be used as the corresponding attachment in a render pass
+      // instance.
+      createInfo.attachmentCount = 1;
+      createInfo.pAttachments = &m_swapchainImageViews[i];
+
+      // why do we have a width & height here? don't we already have the
+      // swapchain images?
+      //  from the doc:
+      // It is legal for a subpass to use no color or depth/stencil attachments,
+      // either because it has no attachment references or because all of them
+      // are VK_ATTACHMENT_UNUSED. This kind of subpass can use shader side
+      // effects such as image stores and atomics to produce an output. In this
+      // case, the subpass continues to use the width, height, and layers of the
+      // framebuffer to define the dimensions of the rendering area[...]
+      createInfo.width = m_swapchainExtent.width;
+      createInfo.height = m_swapchainExtent.height;
+
+      createInfo.layers = 1;
+
+      if (vkCreateFramebuffer(m_device, &createInfo, nullptr,
+                              &m_swapchainFramebuffers[i]) != VK_SUCCESS) {
+        throw std::runtime_error("Failed to create framebuffer!");
+      }
+    }
+  }
+
   void mainLoop() {
     while (!glfwWindowShouldClose(m_window)) {
       glfwPollEvents();
@@ -801,6 +852,10 @@ private:
 
     vkDestroyPipeline(m_device, m_graphicsPipeline, nullptr);
     vkDestroyPipelineLayout(m_device, m_pipelineLayout, nullptr);
+
+    for (const VkFramebuffer &framebuffer : m_swapchainFramebuffers) {
+      vkDestroyFramebuffer(m_device, framebuffer, nullptr);
+    }
 
     vkDestroyRenderPass(m_device, m_renderPass, nullptr);
 
