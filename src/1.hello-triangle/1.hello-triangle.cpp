@@ -49,6 +49,7 @@ private:
   std::vector<VkImage> m_swapchainImages;
   std::vector<VkImageView> m_swapchainImageViews;
 
+  VkRenderPass m_renderPass;
   VkPipelineLayout m_pipelineLayout;
 
   void initWindow() {
@@ -119,6 +120,7 @@ private:
     }
   }
 
+  /// Create the debug messenger that will handle all messages.
   void setupDebugMessenger() {
 
     if (!enableValidationLayers) {
@@ -134,15 +136,15 @@ private:
     }
   }
 
-  /// creates the surface to interact with the window system
+  /// creates the surface to interact with the window system.
   void createSurface() {
     if (glfwCreateWindowSurface(m_instance, m_window, nullptr, &m_surface) !=
         VK_SUCCESS) {
-      throw std::runtime_error("Failed to create window surface!");
+      throw std::runtime_error{"Failed to create window surface!"};
     }
   }
 
-  /// Pick the optimal swapchain surface format (B8G8R8A8 & SRGB)
+  /// Pick the optimal swapchain surface format (B8G8R8A8 & SRGB).
   VkSurfaceFormatKHR pickSwapchainSurfaceFormat(
       const std::vector<VkSurfaceFormatKHR> &availableFormats) {
 
@@ -157,9 +159,9 @@ private:
     return availableFormats[0];
   }
 
-  /// Pick the optimal swapchain present mode (VK_PRESENT_MODE_MAILBOX_KHR)
-  VkPresentModeKHR
-  pickSwapchainPresentMode(const std::vector<VkPresentModeKHR> availableModes) {
+  /// Pick the optimal swapchain present mode (VK_PRESENT_MODE_MAILBOX_KHR).
+  VkPresentModeKHR pickSwapchainPresentMode(
+      const std::vector<VkPresentModeKHR> &availableModes) {
 
     for (const VkPresentModeKHR &presentMode : availableModes) {
       if (presentMode == VK_PRESENT_MODE_MAILBOX_KHR) {
@@ -180,6 +182,7 @@ private:
       // special case - the window manager asks us to pick the surface
 
       VkExtent2D currentExtent{WIDTH, HEIGHT};
+
       currentExtent.width = glm::clamp(
           currentExtent.width, surfaceCapabilities.minImageExtent.width,
           surfaceCapabilities.maxImageExtent.width);
@@ -219,9 +222,9 @@ private:
       return false;
     }
 
-    // any GPU that supports graphics queue & presenting images
     QueueFamilyIndices queueFamilyIndices = findQueueFamilies(physicalDevice);
 
+    // any GPU that supports graphics queue & presenting images
     return queueFamilyIndices.isComplete();
   }
 
@@ -275,7 +278,8 @@ private:
       queueCreateInfo.queueCount = 1;
       queueCreateInfo.queueFamilyIndex = queueFamilyIndex;
 
-      // queue priority in the command buffer scheduling
+      // queue priority in the command buffer scheduling. Not used for now but
+      // we still have to fill it
       float queuePriority = 1.0f;
       queueCreateInfo.pQueuePriorities = &queuePriority;
 
@@ -298,7 +302,7 @@ private:
     createInfo.enabledExtensionCount = extensions.size();
     createInfo.ppEnabledExtensionNames = extensions.data();
 
-    // layer extensions are deprecated, but we should set them for older
+    // device layers are deprecated, but we could set them for older
     // implementations
     std::vector<const char *> layers = getRequiredLayers();
     createInfo.enabledLayerCount = layers.size();
@@ -345,6 +349,8 @@ private:
     return indices;
   }
 
+  /// Creates the swapchain, picking the optimal configuration (surface format,
+  /// present mode, extent, number of images...)
   void createSwapchain() {
 
     SwapchainSupportDetails swapchainDetails =
@@ -363,7 +369,7 @@ private:
     uint32_t imageCount = swapchainDetails.capabilities.minImageCount + 1;
 
     // Also careful to not exceed the maxImageCount (0 is a special value that
-    // means 'unbounded')
+    // means 'don't care')
     if (swapchainDetails.capabilities.maxImageCount > 0) {
       imageCount =
           glm::min(imageCount, swapchainDetails.capabilities.maxImageCount);
@@ -432,6 +438,7 @@ private:
     m_swapchainImages = getSwapchainImages(m_device, m_swapchain);
   }
 
+  /// Create the imageviews that allow us to interact with the swapchain images.
   void createImageViews() {
 
     m_swapchainImageViews.resize(m_swapchainImages.size());
@@ -470,8 +477,91 @@ private:
     }
   }
 
-  void createRenderPass() {}
+  /// Setup the render pass (specify the framebuffer attachments & subpasses
+  /// that will be used for rendering the frame).
+  void createRenderPass() {
 
+    // we are going to use just a color buffer attachment. The format should
+    // match with the swapchain images
+    VkAttachmentDescription colorAttachmentDesc{};
+    colorAttachmentDesc.format = m_swapchainImageFormat;
+    colorAttachmentDesc.samples = VK_SAMPLE_COUNT_1_BIT;
+
+    // to clear the values before
+    colorAttachmentDesc.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    // to store the content in memory so we can read them later (so we can
+    // present them)
+    colorAttachmentDesc.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+
+    // we don't care about the initial stencil values nor the final stencil
+    // values
+    colorAttachmentDesc.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    colorAttachmentDesc.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+
+    // images need to be in specific layouts that are suitable to the operation
+    // they are going to be involved next
+
+    // initial layout is the layout the images will have before the render pass
+    // begins. Since we are going to clear the image anyway we don't care about
+    // the initial layout
+    colorAttachmentDesc.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+    // final layout is the layout the images will have after the render pass
+    // ends. Since we want to present the images this is the optimal
+    // layout.
+    colorAttachmentDesc.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
+    // a render pass can consist of multiple subpasses. for example, a sequence
+    // of post-processing events would be multiple passes since each one depends
+    // on the results of the previous one. By grouping them in a single
+    // renderpass vulkan can reorder operations and conserve memory bandwidth.
+
+    // for now just a simple subpass
+
+    VkAttachmentReference colorAttachmentRef{};
+
+    // this references the AttachmentDescription at index 0 (the one we have
+    // created previously).
+    colorAttachmentRef.attachment = 0;
+
+    // the layout we would like the attachment to have during the subpass.
+    // Vulkan will transition the attachment to this layout when the subpass
+    // starts.
+    colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+    VkSubpassDescription subpassDesc{};
+    subpassDesc.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+
+    // The order of these color attachments is directly referenced in the
+    // shaders: layout(location = 0) vec4 outColor;
+    subpassDesc.colorAttachmentCount = 1;
+    subpassDesc.pColorAttachments = &colorAttachmentRef;
+
+    VkRenderPassCreateInfo renderPassInfo{};
+    renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+
+    // it seems 'weird' that we have to specify the attachments twice: in the
+    // renderpass we reference the attachmentDesc and in the subpass we
+    // reference the  attachmentRef, which also points to the index of the
+    // attachmentDesc in the renderpass.
+
+    // It makes sense, since the subpass can only work with attachments already
+    // defined in the renderpass. But i still have to wrap my head around it.
+
+    renderPassInfo.attachmentCount = 1;
+    renderPassInfo.pAttachments = &colorAttachmentDesc;
+
+    renderPassInfo.subpassCount = 1;
+    renderPassInfo.pSubpasses = &subpassDesc;
+
+    if (vkCreateRenderPass(m_device, &renderPassInfo, nullptr, &m_renderPass) !=
+        VK_SUCCESS) {
+      throw std::runtime_error("Failed to create RenderPass!");
+    }
+  }
+
+  /// Creates & configures the rendering pipeline & stages (vertex input, vertex
+  /// shader, rasterizer, fragment shader...)
   void createGraphicsPipeline() {
 
     // *** shader modules ***
@@ -664,6 +754,7 @@ private:
   void cleanup() {
 
     vkDestroyPipelineLayout(m_device, m_pipelineLayout, nullptr);
+    vkDestroyRenderPass(m_device, m_renderPass, nullptr);
 
     for (const VkImageView &imageView : m_swapchainImageViews) {
       vkDestroyImageView(m_device, imageView, nullptr);
