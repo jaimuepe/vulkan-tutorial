@@ -18,6 +18,12 @@
 constexpr uint32_t WIDTH = 800;
 constexpr uint32_t HEIGHT = 600;
 
+/// Defines how many simultaneous frames we can process in the
+/// drawFrame function. If we try to push one more we will have to wait
+/// (vkWaitFences).
+/// Shouldn't be higher than the number of swapchainImages!
+constexpr int MAX_FRAMES_IN_FLIGHT = 2;
+
 class HelloTriangleApp {
 
 public:
@@ -59,8 +65,11 @@ private:
   VkCommandPool m_commandPool;
   std::vector<VkCommandBuffer> m_commandBuffers;
 
-  VkSemaphore m_imageAvailableSemaphore;
-  VkSemaphore m_renderFinishedSemaphore;
+  std::vector<VkSemaphore> m_imageAvailableSemaphores;
+  std::vector<VkSemaphore> m_renderFinishedSemaphores;
+  std::vector<VkFence> m_inFlightFences;
+
+  size_t m_currentFrame = 0;
 
   void initWindow() {
 
@@ -86,7 +95,7 @@ private:
     createFramebuffers();
     createCommandPool();
     createCommandBuffers();
-    createSemaphores();
+    createSyncObjects();
   }
 
   /// Create a vkInstance to interact with the vulkan driver
@@ -569,26 +578,30 @@ private:
     subpassDesc.colorAttachmentCount = 1;
     subpassDesc.pColorAttachments = &colorAttachmentRef;
 
-    // the subpass makes the image layout transitions when it starts. However,
-    // at the beginning the image might not be ready, so we need to specify the
-    // subpass dependencies.
+    // we are using a semaphore to wait for the presentation engine to be done
+    // before we can use the image in the drawFrame() method. We also are
+    // telling the command buffer to wait in the
+    // VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT. However, the subpass
+    // layout transition happens as soon as it begins, and we might not have the
+    // image ready yet. One way of solving this is using a subpass dependency to
+    // stop the subpass from starting until we have reached the
+    // VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT stage in the previous
+    // subpass (EXTERNAL - whatever happened before the renderpass).
 
     VkSubpassDependency subpassDependency{};
     // these fields specify the indices of the dependency and the dependent
     // subpass.
-    //  VK_SUBPASS_EXTERNAL refers to the implcit subpass before or
+    //  VK_SUBPASS_EXTERNAL refers to the implicit subpass before or
     // after the render pass (depending if we use it as src or dst)
     subpassDependency.srcSubpass = VK_SUBPASS_EXTERNAL;
     // 0 means our subpass (since we only have one)
     subpassDependency.dstSubpass = 0;
 
-    // basically we are setting a dependency between the external layout
-    // (before the renderpass) and our subpass
-
     // The srcStageMask and srcAccessMask specify the operations where we have
     // to wait and in which stages to they occur.
     // In our case, we have to wait until the image is ready before we can
-    // actually write to it
+    // actually write to it (the semaphore in drawFrame() waits until we reach
+    // VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT)
     subpassDependency.srcStageMask =
         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
     subpassDependency.srcAccessMask = 0;
@@ -630,8 +643,8 @@ private:
     // *** shader modules ***
     // create the shader modules of the pipeline
 
-    std::vector<char> vertShaderCode = readShaderFile("vert.spv");
-    std::vector<char> fragShaderCode = readShaderFile("frag.spv");
+    std::vector<char> vertShaderCode = readShaderFile("shader.vert.spv");
+    std::vector<char> fragShaderCode = readShaderFile("shader.frag.spv");
 
     VkShaderModule vertShaderModule =
         createShaderModule(m_device, vertShaderCode);
@@ -975,24 +988,43 @@ private:
 
   /// We need to create semaphores to synchronize the operations, since they are
   /// executed asynchronously.
-  void createSemaphores() {
+  void createSyncObjects() {
+
+    m_imageAvailableSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
+    m_renderFinishedSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
+    m_inFlightFences.resize(MAX_FRAMES_IN_FLIGHT);
 
     VkSemaphoreCreateInfo semaphoreCreateInfo{};
     semaphoreCreateInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
 
-    if (vkCreateSemaphore(m_device, &semaphoreCreateInfo, nullptr,
-                          &m_imageAvailableSemaphore) != VK_SUCCESS ||
-        vkCreateSemaphore(m_device, &semaphoreCreateInfo, nullptr,
-                          &m_renderFinishedSemaphore) != VK_SUCCESS) {
-      throw std::runtime_error("Failed to create semaphores!");
+    VkFenceCreateInfo fenceCreateInfo{};
+    fenceCreateInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    // we have to create the fences as SIGNALED (to fake that they have been
+    // signaled before and we can use them to wait in our drawFrame function)
+    fenceCreateInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+
+    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+      if (vkCreateSemaphore(m_device, &semaphoreCreateInfo, nullptr,
+                            &m_imageAvailableSemaphores[i]) != VK_SUCCESS ||
+          vkCreateSemaphore(m_device, &semaphoreCreateInfo, nullptr,
+                            &m_renderFinishedSemaphores[i]) != VK_SUCCESS ||
+          vkCreateFence(m_device, &fenceCreateInfo, nullptr,
+                        &m_inFlightFences[i])) {
+        throw std::runtime_error("Failed to create synchronization objects!");
+      }
     }
   }
 
   void mainLoop() {
+
     while (!glfwWindowShouldClose(m_window)) {
       glfwPollEvents();
       drawFrame();
     }
+
+    // since vulkan is asynchronous we have to wait until the all the operations
+    // have ended before we can delete the objects
+    vkDeviceWaitIdle(m_device);
   }
 
   void drawFrame() {
@@ -1001,6 +1033,14 @@ private:
     // 1) Acquiring an image from the swapchain
     // 2) Execute the command buffer with the image as attachment
     // 3) Return the image to the swapchain for presentation
+
+    // but first, we have to wait for the current image to end all previous work
+    // (if CPU is going too fast, the work can be scheduled faster than the gpu
+    // can process it and we might try to fetch an image that is not ready yet)
+
+    vkWaitForFences(m_device, 1, &m_inFlightFences[m_currentFrame], VK_TRUE,
+                    UINT64_MAX);
+    vkResetFences(m_device, 1, &m_inFlightFences[m_currentFrame]);
 
     // *** 1) Acquiring the image ***
 
@@ -1012,19 +1052,22 @@ private:
     // the presentation engine reads have completed.
     uint32_t imageIndex;
     vkAcquireNextImageKHR(m_device, m_swapchain, UINT64_MAX,
-                          m_imageAvailableSemaphore, VK_NULL_HANDLE,
-                          &imageIndex);
+                          m_imageAvailableSemaphores[m_currentFrame],
+                          VK_NULL_HANDLE, &imageIndex);
 
     // *** 2) Submitting the command buffer ***
 
     VkSubmitInfo submitInfo{};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 
-    // We have to wait until the imageAvailableSemaphore is ready (which means
-    // that the presentation engine is no longer using it)
+    // from the doc:
+    // The presentation engine may not have finished reading from the image at
+    // the time it is acquired, so the application must use semaphore and/or
+    // fence to ensure that the image layout and contents are not modified until
+    // the presentation engine reads have completed.
 
     submitInfo.waitSemaphoreCount = 1;
-    submitInfo.pWaitSemaphores = &m_imageAvailableSemaphore;
+    submitInfo.pWaitSemaphores = &m_imageAvailableSemaphores[m_currentFrame];
 
     // Each entry in the waitSemaphores array corresponds with the stage in
     // waitDstStageMask. We are basically saying that it has to wait for the
@@ -1046,18 +1089,52 @@ private:
     // we notify the renderFinishedSemaphore when the command buffer has
     // finished execution
     submitInfo.signalSemaphoreCount = 1;
-    submitInfo.pSignalSemaphores = &m_renderFinishedSemaphore;
+    submitInfo.pSignalSemaphores = &m_renderFinishedSemaphores[m_currentFrame];
 
-    if (vkQueueSubmit(m_graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE) !=
-        VK_SUCCESS) {
+    // the fence will be signaled when the command finishes execution
+    if (vkQueueSubmit(m_graphicsQueue, 1, &submitInfo,
+                      m_inFlightFences[m_currentFrame]) != VK_SUCCESS) {
       throw std::runtime_error("Failed to submit draw command buffer!");
     }
+
+    VkPresentInfoKHR presentInfo{};
+    presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+
+    // we have to wait for the renderFinishedSemaphore before we can grab the
+    // image to present it
+    presentInfo.waitSemaphoreCount = 1;
+    presentInfo.pWaitSemaphores = &m_renderFinishedSemaphores[m_currentFrame];
+
+    presentInfo.swapchainCount = 1;
+    presentInfo.pSwapchains = &m_swapchain;
+    presentInfo.pImageIndices = &imageIndex;
+
+    vkQueuePresentKHR(m_presentQueue, &presentInfo);
+
+    // if we don't wait at the end of the frame we get a bunch of errors because
+    // we are submitting work too fast and reusing the semaphores in different
+    // frames before the previous one has ended with them.
+
+    // however, this is not a good solution because now the whole pipeline is
+    // only used for one frame. Ideally we want to start in the next frame the
+    // stages that are already done in the current frame.
+
+    // vkQueueWaitIdle(m_presentQueue);
+
+    // we can also do this with the flamesInFlight approach: we only allow a
+    // number of frames (lower than the # of swapchainImages) in the background,
+    // and force the synchronization with fences
+
+    m_currentFrame = (m_currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
   }
 
   void cleanup() {
 
-    vkDestroySemaphore(m_device, m_imageAvailableSemaphore, nullptr);
-    vkDestroySemaphore(m_device, m_renderFinishedSemaphore, nullptr);
+    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+      vkDestroySemaphore(m_device, m_imageAvailableSemaphores[i], nullptr);
+      vkDestroySemaphore(m_device, m_renderFinishedSemaphores[i], nullptr);
+      vkDestroyFence(m_device, m_inFlightFences[i], nullptr);
+    }
 
     vkDestroyCommandPool(m_device, m_commandPool, nullptr);
 

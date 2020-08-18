@@ -4,7 +4,8 @@ project(vulkan-tutorial)
 
 set (CMAKE_CXX_STANDARD 17)
 
-# update all git submodules
+### update all git submodules
+#############################
 
 find_package(Git QUIET)
 
@@ -16,6 +17,9 @@ if(GIT_FOUND AND EXISTS "${PROJECT_SOURCE_DIR}/.git")
         message(FATAL_ERROR "git submodule update --init failed with ${GIT_SUBMOD_RESULT}, please checkout submodules")
     endif()
 endif()
+
+### prepare & build projects
+############################
 
 set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
