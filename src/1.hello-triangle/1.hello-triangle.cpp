@@ -57,6 +57,10 @@ private:
   VkPipeline m_graphicsPipeline;
 
   VkCommandPool m_commandPool;
+  std::vector<VkCommandBuffer> m_commandBuffers;
+
+  VkSemaphore m_imageAvailableSemaphore;
+  VkSemaphore m_renderFinishedSemaphore;
 
   void initWindow() {
 
@@ -81,6 +85,8 @@ private:
     createGraphicsPipeline();
     createFramebuffers();
     createCommandPool();
+    createCommandBuffers();
+    createSemaphores();
   }
 
   /// Create a vkInstance to interact with the vulkan driver
@@ -563,6 +569,34 @@ private:
     subpassDesc.colorAttachmentCount = 1;
     subpassDesc.pColorAttachments = &colorAttachmentRef;
 
+    // the subpass makes the image layout transitions when it starts. However,
+    // at the beginning the image might not be ready, so we need to specify the
+    // subpass dependencies.
+
+    VkSubpassDependency subpassDependency{};
+    // these fields specify the indices of the dependency and the dependent
+    // subpass.
+    //  VK_SUBPASS_EXTERNAL refers to the implcit subpass before or
+    // after the render pass (depending if we use it as src or dst)
+    subpassDependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+    // 0 means our subpass (since we only have one)
+    subpassDependency.dstSubpass = 0;
+
+    // basically we are setting a dependency between the external layout
+    // (before the renderpass) and our subpass
+
+    // The srcStageMask and srcAccessMask specify the operations where we have
+    // to wait and in which stages to they occur.
+    // In our case, we have to wait until the image is ready before we can
+    // actually write to it
+    subpassDependency.srcStageMask =
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    subpassDependency.srcAccessMask = 0;
+
+    subpassDependency.dstStageMask =
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    subpassDependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+
     VkRenderPassCreateInfo renderPassInfo{};
     renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
 
@@ -579,6 +613,9 @@ private:
 
     renderPassInfo.subpassCount = 1;
     renderPassInfo.pSubpasses = &subpassDesc;
+
+    renderPassInfo.dependencyCount = 1;
+    renderPassInfo.pDependencies = &subpassDependency;
 
     if (vkCreateRenderPass(m_device, &renderPassInfo, nullptr, &m_renderPass) !=
         VK_SUCCESS) {
@@ -868,13 +905,159 @@ private:
     }
   }
 
+  /// Allocate the command buffers and record the drawing commands in them. We
+  /// need to create one commandBuffer for each image in the swapchain because
+  /// one of the steps of the command is to bind a framebuffer.
+  void createCommandBuffers() {
+
+    m_commandBuffers.resize(m_swapchainFramebuffers.size());
+
+    VkCommandBufferAllocateInfo commandBufferInfo{};
+    commandBufferInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    commandBufferInfo.commandPool = m_commandPool;
+
+    // primary buffers can be submitted to a queue for execution but can't be
+    // called from other command buffers; secondary cannot be submitted directly
+    // but can be called from primary command buffers
+    commandBufferInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+
+    commandBufferInfo.commandBufferCount = m_commandBuffers.size();
+
+    if (vkAllocateCommandBuffers(m_device, &commandBufferInfo,
+                                 m_commandBuffers.data()) != VK_SUCCESS) {
+      throw std::runtime_error("Failed to allocate command buffers!");
+    }
+
+    // record each command buffer
+    for (size_t i = 0; i < m_commandBuffers.size(); ++i) {
+
+      VkCommandBufferBeginInfo beginInfo{};
+      beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+
+      if (vkBeginCommandBuffer(m_commandBuffers[i], &beginInfo) != VK_SUCCESS) {
+        throw std::runtime_error("Failed to begin recording command buffer!");
+      }
+
+      VkRenderPassBeginInfo renderPassInfo{};
+      renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+      renderPassInfo.renderPass = m_renderPass;
+      renderPassInfo.framebuffer = m_swapchainFramebuffers[i];
+
+      // Define the size of the render area. The pixels outside this region will
+      // have undefined values. For best performance it should match the
+      // attachments size.
+      renderPassInfo.renderArea.offset = {0, 0};
+      renderPassInfo.renderArea.extent = m_swapchainExtent;
+
+      VkClearValue clearColor = {0.0f, 0.0f, 0.0f, 1.0f};
+      renderPassInfo.clearValueCount = 1;
+      renderPassInfo.pClearValues = &clearColor;
+
+      // CONTENTS_INLINE means the render pass commands will be embedded in the
+      // primary command buffer and no secondary buffers will be executed.
+      // CONTENTS_SECONDARY means that the renderpass commands will be executed
+      // from secondary render buffers.
+      vkCmdBeginRenderPass(m_commandBuffers[i], &renderPassInfo,
+                           VK_SUBPASS_CONTENTS_INLINE);
+
+      vkCmdBindPipeline(m_commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS,
+                        m_graphicsPipeline);
+
+      vkCmdDraw(m_commandBuffers[i], 3, 1, 0, 0);
+
+      vkCmdEndRenderPass(m_commandBuffers[i]);
+
+      if (vkEndCommandBuffer(m_commandBuffers[i]) != VK_SUCCESS) {
+        throw std::runtime_error("Failed to record command buffer!");
+      }
+    }
+  }
+
+  /// We need to create semaphores to synchronize the operations, since they are
+  /// executed asynchronously.
+  void createSemaphores() {
+
+    VkSemaphoreCreateInfo semaphoreCreateInfo{};
+    semaphoreCreateInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+
+    if (vkCreateSemaphore(m_device, &semaphoreCreateInfo, nullptr,
+                          &m_imageAvailableSemaphore) != VK_SUCCESS ||
+        vkCreateSemaphore(m_device, &semaphoreCreateInfo, nullptr,
+                          &m_renderFinishedSemaphore) != VK_SUCCESS) {
+      throw std::runtime_error("Failed to create semaphores!");
+    }
+  }
+
   void mainLoop() {
     while (!glfwWindowShouldClose(m_window)) {
       glfwPollEvents();
+      drawFrame();
+    }
+  }
+
+  void drawFrame() {
+
+    // The drawing consist of three stages:
+    // 1) Acquiring an image from the swapchain
+    // 2) Execute the command buffer with the image as attachment
+    // 3) Return the image to the swapchain for presentation
+
+    // *** 1) Acquiring the image ***
+
+    // A timeout of UINT64_MAX means no timeout
+    // from the doc:
+    // The presentation engine may not have finished reading from the image at
+    // the time it is acquired, so the application must use semaphore and/or
+    // fence to ensure that the image layout and contents are not modified until
+    // the presentation engine reads have completed.
+    uint32_t imageIndex;
+    vkAcquireNextImageKHR(m_device, m_swapchain, UINT64_MAX,
+                          m_imageAvailableSemaphore, VK_NULL_HANDLE,
+                          &imageIndex);
+
+    // *** 2) Submitting the command buffer ***
+
+    VkSubmitInfo submitInfo{};
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+
+    // We have to wait until the imageAvailableSemaphore is ready (which means
+    // that the presentation engine is no longer using it)
+
+    submitInfo.waitSemaphoreCount = 1;
+    submitInfo.pWaitSemaphores = &m_imageAvailableSemaphore;
+
+    // Each entry in the waitSemaphores array corresponds with the stage in
+    // waitDstStageMask. We are basically saying that it has to wait for the
+    // 'imageAvailableSemaphore' in the stage that writes to the color
+    // attachment (fragmentShader), but it can execute stuff before that stage
+    // even if the image is not yet available.
+
+    // from the doc:
+    // VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT specifies the stage of the
+    // pipeline after blending where the final color values are output from the
+    // pipeline.
+    VkPipelineStageFlags waitStages[] = {
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
+    submitInfo.pWaitDstStageMask = waitStages;
+
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &m_commandBuffers[imageIndex];
+
+    // we notify the renderFinishedSemaphore when the command buffer has
+    // finished execution
+    submitInfo.signalSemaphoreCount = 1;
+    submitInfo.pSignalSemaphores = &m_renderFinishedSemaphore;
+
+    if (vkQueueSubmit(m_graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE) !=
+        VK_SUCCESS) {
+      throw std::runtime_error("Failed to submit draw command buffer!");
     }
   }
 
   void cleanup() {
+
+    vkDestroySemaphore(m_device, m_imageAvailableSemaphore, nullptr);
+    vkDestroySemaphore(m_device, m_renderFinishedSemaphore, nullptr);
 
     vkDestroyCommandPool(m_device, m_commandPool, nullptr);
 
